@@ -1,3 +1,9 @@
 (tests
- (names test_frame test_connection)
- (libraries ws_direct_core bigstringaf alcotest qcheck-core qcheck-alcotest))
+ (names test_frame test_connection test_endpoint)
+ (libraries
+  ws_direct_core
+  bigstringaf
+  faraday
+  alcotest
+  qcheck-core
+  qcheck-alcotest))
