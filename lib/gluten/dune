@@ -1,0 +1,4 @@
+(library
+ (name ws_direct_gluten)
+ (public_name ws-direct-gluten)
+ (libraries ws_direct_core gluten))
