@@ -38,10 +38,19 @@ module Acc = struct
     end
 end
 
+(* Bound the opening-handshake head so a peer that never sends CRLFCRLF cannot
+   grow the buffer without limit (a slowloris-style header flood). 16 KiB is far
+   above any legitimate WebSocket upgrade head. *)
+let max_handshake_head_bytes = 16 * 1024
+
 let read_head flow =
   let b = Buffer.create 256 in
   let one = Cstruct.create 1 in
   let rec loop () =
+    if Buffer.length b > max_handshake_head_bytes then
+      failwith
+        (Printf.sprintf "handshake head exceeded %d bytes without CRLFCRLF"
+           max_handshake_head_bytes);
     let n = Eio.Flow.single_read flow one in
     if n = 0 then loop ()
     else begin

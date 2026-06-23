@@ -154,6 +154,26 @@ let test_reader_exception_isolated () =
          has 0);
       Eio.Flow.shutdown a `All)
 
+(* RFC-0287 review #2: a peer that never sends CRLFCRLF must not grow the
+   handshake buffer without limit. Feed >16 KiB with no terminator and assert
+   read_head fails instead of looping forever. *)
+let test_read_head_caps_oversized () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  (* A concurrent writer floods non-terminator bytes; read_head drains until it
+     hits the cap and raises, at which point Fiber.both cancels the writer. *)
+  let raised =
+    try
+      Eio.Fiber.both
+        (fun () -> Eio.Flow.copy_string (String.make (32 * 1024) 'x') b)
+        (fun () -> ignore (Ws_direct_eio.Driver.read_head a));
+      false
+    with
+    | Failure _ -> true
+  in
+  Alcotest.(check bool) "read_head caps an oversized handshake head" true raised
+
 let () =
   Alcotest.run "ws-direct-eio client"
     [ ( "loopback"
@@ -161,5 +181,7 @@ let () =
             `Quick test_roundtrip
         ; Alcotest.test_case "reader exception is isolated and surfaced as on_error"
             `Quick test_reader_exception_isolated
+        ; Alcotest.test_case "read_head caps oversized handshake head" `Quick
+            test_read_head_caps_oversized
         ] )
     ]

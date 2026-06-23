@@ -116,7 +116,14 @@ let request_key head =
       else if not version_ok then Error "unsupported Sec-WebSocket-Version"
       else (
         match find "sec-websocket-key" with
-        | Some k -> Ok k
+        | Some k ->
+          (* RFC 6455 §4.1: the key is base64 of 16 random bytes; §4.2.1 — a
+             server validates it. Reject anything that does not decode to
+             exactly 16 bytes (a malformed key never decodes, so [decode_exn]
+             raising also rejects). *)
+          if (try String.length (Base64.decode_exn k) = 16 with _ -> false)
+          then Ok k
+          else Error "Sec-WebSocket-Key is not 16 base64-decoded bytes"
         | None -> Error "missing Sec-WebSocket-Key")
 
 let server_response ~key =

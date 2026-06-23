@@ -90,6 +90,31 @@ let test_response_case_insensitive () =
   Alcotest.(check bool) "accepts case-insensitive headers" true
     (ok (H.check_response ~key r))
 
+let request_head ?(key = "dGhlIHNhbXBsZSBub25jZQ==") () =
+  String.concat "\r\n"
+    [ "GET / HTTP/1.1"
+    ; "Host: localhost"
+    ; "Upgrade: websocket"
+    ; "Connection: Upgrade"
+    ; "Sec-WebSocket-Key: " ^ key
+    ; "Sec-WebSocket-Version: 13"
+    ; ""
+    ; ""
+    ]
+
+let test_request_key_valid () =
+  match H.request_key (request_head ()) with
+  | Ok k -> Alcotest.(check string) "returns the key" "dGhlIHNhbXBsZSBub25jZQ==" k
+  | Error e -> Alcotest.failf "expected Ok, got Error %S" e
+
+(* RFC 6455 §4.1/§4.2.1: a key that does not base64-decode to 16 bytes must be
+   rejected by the server. *)
+let test_request_key_rejects_short_key () =
+  let short_key = Base64.encode_string "short" (* 5 bytes *) in
+  match H.request_key (request_head ~key:short_key ()) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected a non-16-byte key to be rejected"
+
 let () =
   Alcotest.run "ws-direct-eio handshake"
     [ ( "accept + request"
@@ -107,5 +132,11 @@ let () =
             test_response_missing_upgrade
         ; Alcotest.test_case "case-insensitive headers" `Quick
             test_response_case_insensitive
+        ] )
+    ; ( "request validation (server)"
+      , [ Alcotest.test_case "valid request returns key" `Quick
+            test_request_key_valid
+        ; Alcotest.test_case "non-16-byte key rejected" `Quick
+            test_request_key_rejects_short_key
         ] )
     ]
