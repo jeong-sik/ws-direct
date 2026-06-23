@@ -193,6 +193,31 @@ let test_close_bad_reason_utf8 () =
   drain C.Server (cf F.Opcode.Close "\x03\xe8\xff") |> fst
   |> check_fail ~code:1007 "non-UTF-8 close reason"
 
+(* --- size caps (RFC 6455 §7.4.1 1009) ----------------------------------- *)
+
+(* a single (unfragmented) frame is a complete message and must obey max_message *)
+let test_single_frame_over_max_message () =
+  let c = C.create ~max_message:4 C.Server in
+  let wire = cf F.Opcode.Binary "abcdef" in
+  let events, _ = C.read_bytes c (bs_of_string wire) ~off:0 ~len:(String.length wire) in
+  check_fail ~code:1009 "single frame over max_message" events
+
+let test_single_frame_within_max_message () =
+  let c = C.create ~max_message:8 C.Server in
+  let wire = cf F.Opcode.Binary "abcd" in
+  let events, _ = C.read_bytes c (bs_of_string wire) ~off:0 ~len:(String.length wire) in
+  match events with
+  | [ C.Message { payload; _ } ] ->
+    Alcotest.(check string) "delivered" "abcd" (Bigstringaf.to_string payload)
+  | _ -> Alcotest.fail "expected a delivered message within the cap"
+
+(* a frame whose payload exceeds max_frame is rejected at parse (1002) *)
+let test_frame_over_max_frame () =
+  let c = C.create ~max_frame:4 C.Server in
+  let wire = cf F.Opcode.Binary "abcdef" in
+  let events, _ = C.read_bytes c (bs_of_string wire) ~off:0 ~len:(String.length wire) in
+  check_fail ~code:1002 "frame over max_frame" events
+
 let () =
   Alcotest.run "ws-direct-core connection"
     [ ( "drain + reassembly"
@@ -241,5 +266,13 @@ let () =
             test_close_reserved_code
         ; Alcotest.test_case "non-UTF-8 reason -> 1007" `Quick
             test_close_bad_reason_utf8
+        ] )
+    ; ( "size caps"
+      , [ Alcotest.test_case "single frame over max_message -> 1009" `Quick
+            test_single_frame_over_max_message
+        ; Alcotest.test_case "single frame within max_message" `Quick
+            test_single_frame_within_max_message
+        ; Alcotest.test_case "frame over max_frame -> 1002" `Quick
+            test_frame_over_max_frame
         ] )
     ]

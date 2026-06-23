@@ -28,7 +28,8 @@ type event =
 
 type t =
   { role : role
-  ; max_message : int
+  ; max_message : int (* cap on a complete message, single-frame or reassembled *)
+  ; max_frame : int (* cap on one frame's payload (DoS guard before reassembly) *)
   ; mutable frag_kind : Message.kind option
       (* the data kind of an in-progress fragmented message, if any *)
   ; mutable frag_chunks : Bigstringaf.t list (* reversed: most recent first *)
@@ -38,9 +39,11 @@ type t =
          [None] for Binary (RFC 6455 §8.1 only constrains Text) *)
   }
 
-let create ?(max_message = Frame.default_max_payload) role =
+let create ?(max_message = Frame.default_max_payload)
+    ?(max_frame = Frame.default_max_payload) role =
   { role
   ; max_message
+  ; max_frame
   ; frag_kind = None
   ; frag_chunks = []
   ; frag_len = 0
@@ -147,6 +150,14 @@ let handle_frame t (p : Frame.parsed) : event option =
       else begin
         let kind = kind_of_data_opcode op in
         if not f.Frame.fin then begin_fragment t kind f.Frame.payload
+        else if bs_len f.Frame.payload > t.max_message then
+          (* a single frame is itself a complete message, so it must obey the
+             message cap — the fragmented path is not the only way to exceed it *)
+          Some
+            (Fail
+               { code = Close_code.message_too_big
+               ; reason = "message exceeds maximum size"
+               })
         else begin
           (* a complete, unfragmented message *)
           match kind with
@@ -201,7 +212,10 @@ let read_bytes t bs ~off ~len =
   let rec loop acc consumed =
     if consumed >= len then (List.rev acc, consumed)
     else
-      match Frame.parse bs ~off:(off + consumed) ~len:(len - consumed) with
+      match
+        Frame.parse ~max_payload:t.max_frame bs ~off:(off + consumed)
+          ~len:(len - consumed)
+      with
       | Frame.Incomplete -> (List.rev acc, consumed)
       | Frame.Protocol_error msg ->
         (List.rev (fail_protocol msg :: acc), consumed)

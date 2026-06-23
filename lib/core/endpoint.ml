@@ -90,11 +90,11 @@ let conn_role = function
   | Client -> Connection.Client
 
 let create role ?(max_message = Frame.default_max_payload)
-    ?(random = default_random) builder =
+    ?(max_frame = Frame.default_max_payload) ?(random = default_random) builder =
   let wsd = Wsd.create ~role ~random in
   let t =
     { wsd
-    ; inbound = Connection.create ~max_message (conn_role role)
+    ; inbound = Connection.create ~max_message ~max_frame (conn_role role)
     ; handlers = noop_handlers
     ; closed = false
     ; wakeup_writer = noop

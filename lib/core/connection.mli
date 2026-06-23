@@ -41,9 +41,11 @@ type event =
 
 type t
 
-(** [create ?max_message role] is a fresh assembler. [max_message] (default
-    64 MiB) bounds the size of a reassembled fragmented message. *)
-val create : ?max_message:int -> role -> t
+(** [create ?max_message ?max_frame role] is a fresh assembler. [max_message]
+    (default 64 MiB) bounds a complete message — single-frame or reassembled.
+    [max_frame] (default 64 MiB) bounds one frame's payload, rejecting an
+    oversized frame before it is buffered. *)
+val create : ?max_message:int -> ?max_frame:int -> role -> t
 
 (** Feed one already-parsed frame. Returns [None] while a fragmented message is
     still in progress, [Some event] otherwise. Enforces masking direction,

@@ -45,13 +45,16 @@ val handlers :
 
 type t
 
-(** [create role ?max_message ?random builder] builds an endpoint. [builder]
-    receives the {!Wsd.t} and returns the inbound handlers. [random] yields a
-    fresh 4-byte masking key per client frame; the default is non-cryptographic
-    and the [Client] eio driver must inject a CSPRNG. *)
+(** [create role ?max_message ?max_frame ?random builder] builds an endpoint.
+    [builder] receives the {!Wsd.t} and returns the inbound handlers.
+    [max_message] caps a complete message (single-frame or reassembled) and
+    [max_frame] caps one frame's payload — both default to 64 MiB. [random]
+    yields a fresh 4-byte masking key per client frame; the default is
+    non-cryptographic and the [Client] eio driver must inject a CSPRNG. *)
 val create :
    role
   -> ?max_message:int
+  -> ?max_frame:int
   -> ?random:(unit -> string)
   -> (Wsd.t -> handlers)
   -> t
