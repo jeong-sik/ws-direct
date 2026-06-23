@@ -61,6 +61,15 @@ val create :
 
 val wsd : t -> Wsd.t
 
+(** Deliver a fallback terminal callback so a driver can guarantee that exactly
+    one of [on_close] / [on_error] / [on_eof] fires per connection — required
+    by callback->blocking bridges that would otherwise hang on an abnormal exit
+    (TLS error, cancellation). Both are idempotent: they fire only if no
+    terminal handler has run yet, and never after a clean Close / Fail / eof. *)
+val ensure_terminal_eof : t -> unit
+
+val notify_error : t -> string -> unit
+
 (* --- gluten RUNTIME-shaped operations ---------------------------------- *)
 
 val next_read_operation : t -> [ `Read | `Yield | `Close ]

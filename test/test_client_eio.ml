@@ -98,10 +98,68 @@ let test_roundtrip () =
         (Eio.Promise.await reply);
       Eio.Flow.shutdown a `All)
 
+(* Server that completes the handshake then sends one unmasked Text frame, used
+   to drive the client's reader into a handler that raises. *)
+let server_send_trigger flow =
+  let head = read_head flow in
+  let key =
+    match header_value head "sec-websocket-key" with
+    | Some k -> k
+    | None -> Alcotest.fail "server: no Sec-WebSocket-Key in request"
+  in
+  let resp =
+    String.concat "\r\n"
+      [ "HTTP/1.1 101 Switching Protocols"
+      ; "Upgrade: websocket"
+      ; "Connection: Upgrade"
+      ; "Sec-WebSocket-Accept: " ^ H.accept_token key
+      ; ""
+      ; ""
+      ]
+  in
+  Eio.Flow.copy_string resp flow;
+  Eio.Flow.copy_string (F.to_string (F.of_string F.Opcode.Text "trigger")) flow
+
+(* P0 (RFC-0287 review): an exception raised inside the reader path — here an
+   [on_message] handler that throws, the same propagation route as a mid-session
+   [Tls_failure] — must NOT escape the driver to fail the parent switch (that
+   would take down every sibling fiber). The driver must contain it, deliver it
+   as [on_error] (so a callback->stream bridge unblocks), and exit cleanly. *)
+let test_reader_exception_isolated () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  let errored, set_errored = Eio.Promise.create () in
+  Eio.Fiber.both
+    (fun () -> server_send_trigger b)
+    (fun () ->
+      let _wsd =
+        Ws_direct_eio.Client.connect ~sw ~random:test_random ~host:"localhost"
+          ~resource:"/" a (fun _ ->
+            E.handlers
+              ~on_message:(fun _ -> failwith "handler boom")
+              ~on_error:(fun msg -> Eio.Promise.resolve set_errored msg)
+              ())
+      in
+      (* If the driver re-raised instead of containing, this await would never
+         resolve — the fork would have failed the switch first. *)
+      let msg = Eio.Promise.await errored in
+      Alcotest.(check bool)
+        "on_error carries the cause" true
+        (let n = String.length "boom" in
+         let rec has i =
+           i + n <= String.length msg
+           && (String.sub msg i n = "boom" || has (i + 1))
+         in
+         has 0);
+      Eio.Flow.shutdown a `All)
+
 let () =
   Alcotest.run "ws-direct-eio client"
     [ ( "loopback"
       , [ Alcotest.test_case "handshake + masked round-trip over socketpair"
             `Quick test_roundtrip
+        ; Alcotest.test_case "reader exception is isolated and surfaced as on_error"
+            `Quick test_reader_exception_isolated
         ] )
     ]

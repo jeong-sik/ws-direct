@@ -133,6 +133,60 @@ let test_protocol_error_closes () =
   let code = (Char.code p.[0] lsl 8) lor Char.code p.[1] in
   Alcotest.(check int) "close code 1002" 1002 code
 
+(* A driver must deliver exactly one terminal handler per connection so a
+   blocking consumer (a callback->stream bridge) always unblocks, even on an
+   abnormal exit (TLS error, cancellation) where no Close/Fail/eof was seen.
+   These pin the [ensure_terminal_eof] / [notify_error] guard. *)
+let test_ensure_terminal_eof_fires_once () =
+  let eofs = ref 0 in
+  let t = E.create E.Server (fun _ -> E.handlers ~on_eof:(fun () -> incr eofs) ()) in
+  E.ensure_terminal_eof t;
+  E.ensure_terminal_eof t;
+  Alcotest.(check int) "on_eof fired exactly once" 1 !eofs
+
+let test_notify_error_suppresses_later_eof () =
+  let errs = ref [] and eofs = ref 0 in
+  let t =
+    E.create E.Server (fun _ ->
+        E.handlers
+          ~on_error:(fun m -> errs := m :: !errs)
+          ~on_eof:(fun () -> incr eofs)
+          ())
+  in
+  E.notify_error t "tls boom";
+  E.ensure_terminal_eof t;
+  Alcotest.(check (list string)) "on_error fired once with cause" [ "tls boom" ] !errs;
+  Alcotest.(check int) "on_eof suppressed after error" 0 !eofs
+
+let test_no_fallback_after_clean_close () =
+  let eofs = ref 0 and closed = ref false in
+  let t =
+    E.create E.Server (fun _ ->
+        E.handlers
+          ~on_close:(fun ~code:_ ~reason:_ -> closed := true)
+          ~on_eof:(fun () -> incr eofs)
+          ())
+  in
+  let close = cf F.Opcode.Close "\x03\xe8" in
+  ignore (E.read t (bs_of_string close) ~off:0 ~len:(String.length close));
+  E.ensure_terminal_eof t;
+  Alcotest.(check bool) "on_close fired" true !closed;
+  Alcotest.(check int) "no fallback eof after clean close" 0 !eofs
+
+let test_no_error_after_eof () =
+  let eofs = ref 0 and errs = ref 0 in
+  let t =
+    E.create E.Server (fun _ ->
+        E.handlers
+          ~on_eof:(fun () -> incr eofs)
+          ~on_error:(fun _ -> incr errs)
+          ())
+  in
+  ignore (E.read_eof t (bs_of_string "") ~off:0 ~len:0);
+  E.notify_error t "late";
+  Alcotest.(check int) "on_eof fired once" 1 !eofs;
+  Alcotest.(check int) "no error after eof" 0 !errs
+
 let () =
   Alcotest.run "ws-direct-core endpoint"
     [ ( "control automation"
@@ -152,5 +206,14 @@ let () =
             test_client_to_server
         ; Alcotest.test_case "fragmented message reassembled" `Quick
             test_fragmented_round_trip
+        ] )
+    ; ( "terminal delivery"
+      , [ Alcotest.test_case "ensure_terminal_eof is idempotent" `Quick
+            test_ensure_terminal_eof_fires_once
+        ; Alcotest.test_case "notify_error suppresses later eof" `Quick
+            test_notify_error_suppresses_later_eof
+        ; Alcotest.test_case "no fallback eof after clean close" `Quick
+            test_no_fallback_after_clean_close
+        ; Alcotest.test_case "no error after eof" `Quick test_no_error_after_eof
         ] )
     ]

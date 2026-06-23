@@ -81,6 +81,13 @@ type t =
   ; inbound : Connection.t
   ; mutable handlers : handlers
   ; mutable closed : bool
+  ; (* Set once any of on_close / on_error / on_eof has fired. A driver must
+       deliver exactly one terminal handler per connection so a blocking
+       consumer (e.g. a callback->stream bridge) always unblocks; this guard
+       lets [ensure_terminal_eof] / [notify_error] fire a fallback terminal on
+       an abnormal exit (TLS error, cancellation) without double-firing after a
+       clean Close/Fail/eof. *)
+    mutable terminal_delivered : bool
   ; mutable wakeup_writer : unit -> unit
   ; mutable wakeup_reader : unit -> unit
   }
@@ -97,6 +104,7 @@ let create role ?(max_message = Frame.default_max_payload)
     ; inbound = Connection.create ~max_message ~max_frame (conn_role role)
     ; handlers = noop_handlers
     ; closed = false
+    ; terminal_delivered = false
     ; wakeup_writer = noop
     ; wakeup_reader = noop
     }
@@ -125,6 +133,21 @@ let shutdown t =
     kr ()
   end
 
+(* Deliver a fallback terminal handler on an abnormal exit (no Close/Fail/eof
+   was observed), e.g. a TLS error or cancellation in the driver. Idempotent
+   via [terminal_delivered] so it never double-fires after a clean terminal. *)
+let ensure_terminal_eof t =
+  if not t.terminal_delivered then begin
+    t.terminal_delivered <- true;
+    t.handlers.on_eof ()
+  end
+
+let notify_error t msg =
+  if not t.terminal_delivered then begin
+    t.terminal_delivered <- true;
+    t.handlers.on_error msg
+  end
+
 let handle_event t = function
   | Connection.Message m -> t.handlers.on_message m
   | Connection.Ping p ->
@@ -133,10 +156,12 @@ let handle_event t = function
   | Connection.Pong p -> t.handlers.on_pong p
   | Connection.Close { code; reason } ->
     t.handlers.on_close ~code ~reason;
+    t.terminal_delivered <- true;
     Wsd.send_close t.wsd ?code ();
     shutdown t
   | Connection.Fail { code; reason } ->
     t.handlers.on_error reason;
+    t.terminal_delivered <- true;
     Wsd.send_close t.wsd ~code:(Close_code.to_int code) ~reason ();
     shutdown t
 
@@ -150,6 +175,7 @@ let read t bs ~off ~len = process t bs ~off ~len
 let read_eof t bs ~off ~len =
   let n = process t bs ~off ~len in
   t.handlers.on_eof ();
+  t.terminal_delivered <- true;
   shutdown t;
   n
 
@@ -169,5 +195,7 @@ let report_write_result t = function
 let yield_writer t k =
   if Faraday.is_closed t.wsd.Wsd.writer then k () else t.wakeup_writer <- k
 
-let report_exn t _exn = shutdown t
+let report_exn t exn =
+  notify_error t (Printexc.to_string exn);
+  shutdown t
 let is_closed t = t.closed

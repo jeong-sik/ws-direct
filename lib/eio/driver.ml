@@ -102,8 +102,24 @@ let drive flow endpoint =
   Fun.protect
     ~finally:(fun () -> Endpoint.shutdown endpoint)
     (fun () ->
-      try
+      match
         Eio.Fiber.both
           (fun () -> writer flow endpoint)
           (fun () -> reader flow endpoint)
-      with End_of_file | Eio.Io _ -> ())
+      with
+      | () ->
+        (* Clean exit (peer EOF or Close already routed a terminal handler);
+           guarantee one for the writer-closed-first case too. *)
+        Endpoint.ensure_terminal_eof endpoint
+      | exception (Eio.Cancel.Cancelled _ as e) ->
+        (* Cancellation MUST propagate (Eio), but deliver a terminal first so a
+           blocking consumer unblocks before the switch tears down. *)
+        Endpoint.ensure_terminal_eof endpoint;
+        raise e
+      | exception e ->
+        (* Fault isolation: a per-connection transport error (e.g. a
+           mid-session TLS [Tls_failure]/[Tls_alert]) must NOT escape to fail
+           the parent switch — that would take down every sibling fiber (the
+           whole gateway). Deliver it as [on_error] and exit cleanly so the
+           caller reconnects via its own policy. *)
+        Endpoint.notify_error endpoint (Printexc.to_string e))
