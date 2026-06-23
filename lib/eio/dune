@@ -1,0 +1,4 @@
+(library
+ (name ws_direct_eio)
+ (public_name ws-direct-eio)
+ (libraries ws_direct_core eio digestif base64 mirage-crypto-rng cstruct))

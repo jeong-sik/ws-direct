@@ -1,9 +1,17 @@
 (tests
- (names test_frame test_connection test_endpoint test_utf8)
+ (names test_frame test_connection test_endpoint test_utf8 test_handshake
+   test_client_eio)
  (libraries
   ws_direct_core
+  ws_direct_eio
   bigstringaf
   faraday
+  cstruct
+  eio
+  eio.unix
+  eio_main
+  digestif
+  base64
   alcotest
   qcheck-core
   qcheck-alcotest))

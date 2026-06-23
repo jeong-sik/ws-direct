@@ -54,7 +54,6 @@
 
 (package
  (name ws-direct-eio)
- (allow_empty)
  (synopsis "Eio client/server driver for ws-direct")
  (description
   "Drives ws-direct's connection over an Eio.Flow.two_way, including the client-side HTTP upgrade handshake. Works over any flow, including TLS flows (Tls_eio.t).")
@@ -65,4 +64,12 @@
    (>= 3.13))
   (ws-direct-core
    (= :version))
-  eio))
+  eio
+  digestif
+  base64
+  mirage-crypto-rng
+  cstruct
+  (eio_main
+   (and
+    :with-test
+    (>= 1.0)))))

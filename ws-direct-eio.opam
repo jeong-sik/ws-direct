@@ -14,6 +14,11 @@ depends: [
   "dune" {>= "3.13" & >= "3.13"}
   "ws-direct-core" {= version}
   "eio"
+  "digestif"
+  "base64"
+  "mirage-crypto-rng"
+  "cstruct"
+  "eio_main" {with-test & >= "1.0"}
   "odoc" {with-doc}
 ]
 build: [
