@@ -1,0 +1,4 @@
+(library
+ (name ws_direct_core)
+ (public_name ws-direct-core)
+ (libraries bigstringaf faraday))
