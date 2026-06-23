@@ -82,6 +82,33 @@ let test_max_payload_guard () =
   | F.Protocol_error _ -> ()
   | _ -> Alcotest.fail "expected Protocol_error when payload exceeds max"
 
+(* RFC 6455 §5.2: the length MUST use the minimal number of bytes. These wire
+   frames are hand-crafted because [serialize] always emits the minimal form, so
+   the round-trip tests can never exercise a non-minimal encoding. *)
+let test_non_minimal_16 () =
+  (* 126-form (16-bit) carrying 100, which fits the 7-bit form *)
+  let wire = "\x82\x7e\x00\x64" ^ String.make 100 'x' in
+  match F.parse (bs_of_string wire) ~off:0 ~len:(String.length wire) with
+  | F.Protocol_error _ -> ()
+  | _ -> Alcotest.fail "expected Protocol_error for non-minimal 16-bit length"
+
+let test_non_minimal_64 () =
+  (* 127-form (64-bit) carrying 256, which fits the 16-bit form *)
+  let wire =
+    "\x82\x7f\x00\x00\x00\x00\x00\x00\x01\x00" ^ String.make 256 'x'
+  in
+  match F.parse (bs_of_string wire) ~off:0 ~len:(String.length wire) with
+  | F.Protocol_error _ -> ()
+  | _ -> Alcotest.fail "expected Protocol_error for non-minimal 64-bit length"
+
+let test_minimal_16_ok () =
+  (* 126-form carrying exactly 126 is the minimal encoding and must parse *)
+  let wire = "\x82\x7e\x00\x7e" ^ String.make 126 'x' in
+  match F.parse (bs_of_string wire) ~off:0 ~len:(String.length wire) with
+  | F.Frame ({ frame; _ }, _) ->
+    Alcotest.(check int) "len 126" 126 (Bigstringaf.length frame.F.payload)
+  | _ -> Alcotest.fail "expected a valid frame for minimal 16-bit length"
+
 (* --- Round-trip --------------------------------------------------------- *)
 
 let roundtrip ?mask opcode s =
@@ -153,6 +180,12 @@ let () =
         ; Alcotest.test_case "reserved opcode" `Quick test_reserved_opcode
         ; Alcotest.test_case "oversized control" `Quick test_control_too_large
         ; Alcotest.test_case "max payload guard" `Quick test_max_payload_guard
+        ; Alcotest.test_case "non-minimal 16-bit length" `Quick
+            test_non_minimal_16
+        ; Alcotest.test_case "non-minimal 64-bit length" `Quick
+            test_non_minimal_64
+        ; Alcotest.test_case "minimal 16-bit length ok" `Quick
+            test_minimal_16_ok
         ] )
     ; ( "frame roundtrip"
       , [ Alcotest.test_case "lengths" `Quick test_roundtrip_lengths

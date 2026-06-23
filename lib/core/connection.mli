@@ -29,10 +29,15 @@ type event =
   | Close of
       { code : int option
       ; reason : string
+      }  (** a valid Close frame from the peer (code already validated) *)
+  | Fail of
+      { code : Close_code.t
+      ; reason : string
       }
-  | Protocol_error of string
-      (** the peer violated the protocol; the connection must be failed (close
-          code 1002) *)
+      (** the connection must be failed (RFC 6455 §7.1.7): the peer violated the
+          protocol ([Close_code.protocol_error], 1002) or sent invalid payload
+          data such as non-UTF-8 text ([Close_code.invalid_payload], 1007). The
+          driver should send a Close with this code and then shut down. *)
 
 type t
 
@@ -50,5 +55,5 @@ val handle_frame : t -> Frame.parsed -> event option
     in order and the number of bytes consumed. An incomplete trailing frame is
     left unconsumed (its bytes are reported as not consumed) so the caller can
     re-present them once more data arrives. Parsing stops at the first
-    {!Protocol_error}, which is included as the final event. *)
+    {!Fail}, which is included as the final event. *)
 val read_bytes : t -> Bigstringaf.t -> off:int -> len:int -> event list * int

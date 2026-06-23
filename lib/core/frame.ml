@@ -137,6 +137,13 @@ let parse ?(max_payload = default_max_payload) bs ~off ~len =
         in
         if payload_len < 0 then
           Protocol_error "payload length exceeds addressable range"
+        else if
+          (* RFC 6455 §5.2: the length MUST use the minimal number of bytes, so
+             the 16-bit form requires >= 126 and the 64-bit form requires
+             > 0xFFFF. Rejecting non-minimal encodings closes Autobahn 5.x. *)
+          (len7 = 126 && payload_len < 126)
+          || (len7 = 127 && payload_len <= 0xFFFF)
+        then Protocol_error "non-minimal length encoding"
         else if payload_len > max_payload then
           Protocol_error
             (Printf.sprintf "payload length %d exceeds max %d" payload_len

@@ -135,9 +135,9 @@ let handle_event t = function
     t.handlers.on_close ~code ~reason;
     Wsd.send_close t.wsd ?code ();
     shutdown t
-  | Connection.Protocol_error msg ->
-    t.handlers.on_error msg;
-    Wsd.send_close t.wsd ~code:1002 ~reason:msg ();
+  | Connection.Fail { code; reason } ->
+    t.handlers.on_error reason;
+    Wsd.send_close t.wsd ~code:(Close_code.to_int code) ~reason ();
     shutdown t
 
 let process t bs ~off ~len =

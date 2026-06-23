@@ -128,7 +128,10 @@ let test_protocol_error_closes () =
   Alcotest.(check bool) "on_error fired" true !errored;
   Alcotest.(check bool) "closed after error" true (E.is_closed t);
   let { F.frame; _ } = parse1 (drain_output t) in
-  Alcotest.(check bool) "sent Close 1002" true (frame.F.opcode = F.Opcode.Close)
+  Alcotest.(check bool) "sent a Close" true (frame.F.opcode = F.Opcode.Close);
+  let p = F.payload_string frame in
+  let code = (Char.code p.[0] lsl 8) lor Char.code p.[1] in
+  Alcotest.(check int) "close code 1002" 1002 code
 
 let () =
   Alcotest.run "ws-direct-core endpoint"
