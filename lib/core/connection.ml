@@ -208,6 +208,14 @@ let handle_frame t (p : Frame.parsed) : event option =
           end
         end)
 
+(* A terminal event ends inbound processing for this connection: a [Fail] (RFC
+   6455 §7.1.7 — once the connection is failed, no further data may be processed)
+   or a peer [Close] (§5.5.1/§7.1.4 — a data frame received after a Close is not
+   delivered). [Message]/[Ping]/[Pong] are non-terminal. *)
+let is_terminal_event = function
+  | Close _ | Fail _ -> true
+  | Message _ | Ping _ | Pong _ -> false
+
 let read_bytes t bs ~off ~len =
   let rec loop acc consumed =
     if consumed >= len then (List.rev acc, consumed)
@@ -219,10 +227,16 @@ let read_bytes t bs ~off ~len =
       | Frame.Incomplete -> (List.rev acc, consumed)
       | Frame.Protocol_error msg ->
         (List.rev (fail_protocol msg :: acc), consumed)
-      | Frame.Frame (p, n) ->
-        let acc =
-          match handle_frame t p with Some ev -> ev :: acc | None -> acc
-        in
-        loop acc (consumed + n)
+      | Frame.Frame (p, n) -> (
+        match handle_frame t p with
+        | Some ev when is_terminal_event ev ->
+          (* Stop at the first terminal event, included as the final event
+             (mirroring the Protocol_error arm). The terminal frame's [n] bytes
+             are consumed; any trailing bytes in this buffer are deliberately
+             left unparsed — the driver shuts the connection down on this
+             event, so a later frame must never reach the application. *)
+          (List.rev (ev :: acc), consumed + n)
+        | Some ev -> loop (ev :: acc) (consumed + n)
+        | None -> loop acc (consumed + n))
   in
   loop [] 0
