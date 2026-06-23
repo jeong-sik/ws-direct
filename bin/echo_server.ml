@@ -20,11 +20,12 @@ let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.any, port) in
   let sock = Eio.Net.listen ~sw ~backlog:128 ~reuse_addr:true net addr in
   Printf.printf "ws-direct echo server listening on 0.0.0.0:%d\n%!" port;
   let handle flow _addr =
-    try Ws_direct_eio.Server.handle flow echo_handlers with
+    try Ws_direct_eio.Server.handle ~clock flow echo_handlers with
     | Failure _ -> () (* invalid handshake: drop the connection *)
   in
   while true do

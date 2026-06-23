@@ -1,7 +1,8 @@
 module Endpoint = Ws_direct_core.Endpoint
 
-let handle ?(max_message = Ws_direct_core.Frame.default_max_payload) flow builder =
-  let head = Driver.read_head flow in
+let handle ?(max_message = Ws_direct_core.Frame.default_max_payload)
+    ?handshake_timeout ~clock flow builder =
+  let head = Driver.read_head ?timeout:handshake_timeout ~clock flow in
   match Handshake.request_key head with
   | Error msg -> failwith ("ws-direct server handshake failed: " ^ msg)
   | Ok key ->

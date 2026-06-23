@@ -43,29 +43,42 @@ end
    above any legitimate WebSocket upgrade head. *)
 let max_handshake_head_bytes = 16 * 1024
 
-let read_head flow =
-  let b = Buffer.create 256 in
-  let one = Cstruct.create 1 in
-  let rec loop () =
-    if Buffer.length b > max_handshake_head_bytes then
-      failwith
-        (Printf.sprintf "handshake head exceeded %d bytes without CRLFCRLF"
-           max_handshake_head_bytes);
-    let n = Eio.Flow.single_read flow one in
-    if n = 0 then loop ()
-    else begin
-      Buffer.add_char b (Cstruct.get_char one 0);
-      let len = Buffer.length b in
-      if
-        len >= 4
-        &&
-        let s = Buffer.contents b in
-        String.sub s (len - 4) 4 = "\r\n\r\n"
-      then Buffer.contents b
-      else loop ()
-    end
+(* The byte cap alone limits memory, not lifetime: a peer that dribbles bytes
+   below the terminator (the classic slowloris) holds a fiber + fd until it
+   reaches [max_handshake_head_bytes], which at one byte per second is over four
+   hours. A wall-clock deadline caps the handshake regardless of byte rate
+   (RFC 6455 §10). *)
+let default_handshake_timeout = 10.0
+
+let read_head ?(timeout = default_handshake_timeout) ~clock flow =
+  let read_until_crlfcrlf () =
+    let b = Buffer.create 256 in
+    let one = Cstruct.create 1 in
+    let rec loop () =
+      if Buffer.length b > max_handshake_head_bytes then
+        failwith
+          (Printf.sprintf "handshake head exceeded %d bytes without CRLFCRLF"
+             max_handshake_head_bytes);
+      let n = Eio.Flow.single_read flow one in
+      if n = 0 then loop ()
+      else begin
+        Buffer.add_char b (Cstruct.get_char one 0);
+        let len = Buffer.length b in
+        if
+          len >= 4
+          &&
+          let s = Buffer.contents b in
+          String.sub s (len - 4) 4 = "\r\n\r\n"
+        then Buffer.contents b
+        else loop ()
+      end
+    in
+    loop ()
   in
-  loop ()
+  try Eio.Time.with_timeout_exn clock timeout read_until_crlfcrlf
+  with Eio.Time.Timeout ->
+    failwith
+      (Printf.sprintf "handshake head not completed within %.1fs" timeout)
 
 let iovec_cstruct (iov : Bigstringaf.t Faraday.iovec) =
   Cstruct.of_bigarray iov.Faraday.buffer ~off:iov.Faraday.off ~len:iov.Faraday.len
