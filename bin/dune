@@ -1,0 +1,3 @@
+(executable
+ (name echo_server)
+ (libraries ws_direct_core ws_direct_eio eio eio_main bigstringaf))

@@ -82,3 +82,49 @@ let check_response ~key head =
           else Error "Sec-WebSocket-Accept mismatch")
     | Some code -> Error (Printf.sprintf "expected HTTP 101, got %d" code)
     | None -> Error (Printf.sprintf "malformed status line: %s" status_line))
+
+let request_key head =
+  match split_lines head with
+  | [] -> Error "empty request"
+  | request_line :: header_lines ->
+    let is_get =
+      match String.split_on_char ' ' request_line with
+      | meth :: _ -> String.uppercase_ascii meth = "GET"
+      | [] -> false
+    in
+    if not is_get then Error "not a GET request"
+    else
+      let headers = List.filter_map parse_header header_lines in
+      let find n = List.assoc_opt n headers in
+      let upgrade_ok =
+        match find "upgrade" with
+        | Some v -> String.lowercase_ascii v = "websocket"
+        | None -> false
+      in
+      let connection_ok =
+        match find "connection" with
+        | Some v -> connection_lists_upgrade v
+        | None -> false
+      in
+      let version_ok =
+        match find "sec-websocket-version" with
+        | Some v -> String.trim v = "13"
+        | None -> false
+      in
+      if not upgrade_ok then Error "missing or invalid Upgrade header"
+      else if not connection_ok then Error "missing or invalid Connection header"
+      else if not version_ok then Error "unsupported Sec-WebSocket-Version"
+      else (
+        match find "sec-websocket-key" with
+        | Some k -> Ok k
+        | None -> Error "missing Sec-WebSocket-Key")
+
+let server_response ~key =
+  String.concat "\r\n"
+    [ "HTTP/1.1 101 Switching Protocols"
+    ; "Upgrade: websocket"
+    ; "Connection: Upgrade"
+    ; "Sec-WebSocket-Accept: " ^ accept_token key
+    ; ""
+    ; ""
+    ]

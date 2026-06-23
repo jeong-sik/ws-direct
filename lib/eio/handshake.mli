@@ -23,3 +23,13 @@ val request : host:string -> resource:string -> key:string -> string
     a 101 status with [Upgrade: websocket], a [Connection] header listing
     [upgrade], and a [Sec-WebSocket-Accept] equal to [accept_token key]. *)
 val check_response : key:string -> string -> (unit, string) result
+
+(** [request_key head] validates a client's upgrade request head and returns its
+    [Sec-WebSocket-Key]. [Error] unless it is a GET with [Upgrade: websocket], a
+    [Connection] header listing [upgrade], [Sec-WebSocket-Version: 13], and a
+    [Sec-WebSocket-Key]. *)
+val request_key : string -> (string, string) result
+
+(** [server_response ~key] is the 101 Switching Protocols response a server
+    sends for a client whose [Sec-WebSocket-Key] is [key]. *)
+val server_response : key:string -> string
