@@ -1,5 +1,5 @@
 (tests
- (names test_frame test_connection test_endpoint)
+ (names test_frame test_connection test_endpoint test_utf8)
  (libraries
   ws_direct_core
   bigstringaf
