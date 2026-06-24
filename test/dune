@@ -1,6 +1,6 @@
 (tests
  (names test_frame test_connection test_endpoint test_utf8 test_handshake
-   test_client_eio)
+   test_client_eio test_driver_writer)
  (libraries
   ws_direct_core
   ws_direct_eio

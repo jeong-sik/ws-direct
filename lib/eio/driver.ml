@@ -79,10 +79,22 @@ let writer flow endpoint =
           iovecs
       in
       (match Eio.Flow.write flow (List.map iovec_cstruct iovecs) with
-      | () -> Endpoint.report_write_result endpoint (`Ok total)
+      | () ->
+        Endpoint.report_write_result endpoint (`Ok total);
+        loop ()
       | exception (End_of_file | Eio.Io _) ->
-        Endpoint.report_write_result endpoint `Closed);
-      loop ()
+        (* Transport is gone. [report_write_result `Closed] closes the faraday
+           serializer, but [Faraday.close] does NOT drop the bytes already
+           buffered for this failed write. While those bytes remain,
+           [next_write_operation] keeps returning [`Write] for the SAME bytes
+           (faraday flushes pending output before reporting [`Close]). Looping
+           here would retry the dead transport forever — a 100% CPU busy-spin,
+           re-raising on every pass with no yield point (so it also starves
+           every sibling fiber on the domain). Stop instead, mirroring faraday's
+           own async drivers ([`Closed -> close; return]). [drive]'s reader
+           fiber observes the same dead socket (EOF or [Eio.Io]) and tears the
+           connection down. *)
+        Endpoint.report_write_result endpoint `Closed)
     | `Yield ->
       let p, r = Eio.Promise.create () in
       Endpoint.yield_writer endpoint (Eio.Promise.resolve r);
