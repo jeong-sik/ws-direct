@@ -77,16 +77,17 @@ let server flow =
   Eio.Flow.copy_string (F.to_string (F.of_string F.Opcode.Text "pong")) flow
 
 let test_roundtrip () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
   let reply, set_reply = Eio.Promise.create () in
   Eio.Fiber.both
     (fun () -> server b)
     (fun () ->
       let wsd =
-        Ws_direct_eio.Client.connect ~sw ~random:test_random ~host:"localhost"
-          ~resource:"/" a (fun _ ->
+        Ws_direct_eio.Client.connect ~sw ~random:test_random ~clock
+          ~host:"localhost" ~resource:"/" a (fun _ ->
             E.handlers
               ~on_message:(fun m ->
                 Eio.Promise.resolve set_reply
@@ -126,16 +127,17 @@ let server_send_trigger flow =
    would take down every sibling fiber). The driver must contain it, deliver it
    as [on_error] (so a callback->stream bridge unblocks), and exit cleanly. *)
 let test_reader_exception_isolated () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
   let errored, set_errored = Eio.Promise.create () in
   Eio.Fiber.both
     (fun () -> server_send_trigger b)
     (fun () ->
       let _wsd =
-        Ws_direct_eio.Client.connect ~sw ~random:test_random ~host:"localhost"
-          ~resource:"/" a (fun _ ->
+        Ws_direct_eio.Client.connect ~sw ~random:test_random ~clock
+          ~host:"localhost" ~resource:"/" a (fun _ ->
             E.handlers
               ~on_message:(fun _ -> failwith "handler boom")
               ~on_error:(fun msg -> Eio.Promise.resolve set_errored msg)
@@ -158,8 +160,9 @@ let test_reader_exception_isolated () =
    handshake buffer without limit. Feed >16 KiB with no terminator and assert
    read_head fails instead of looping forever. *)
 let test_read_head_caps_oversized () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
   (* A concurrent writer floods non-terminator bytes; read_head drains until it
      hits the cap and raises, at which point Fiber.both cancels the writer. *)
@@ -167,12 +170,32 @@ let test_read_head_caps_oversized () =
     try
       Eio.Fiber.both
         (fun () -> Eio.Flow.copy_string (String.make (32 * 1024) 'x') b)
-        (fun () -> ignore (Ws_direct_eio.Driver.read_head a));
+        (fun () -> ignore (Ws_direct_eio.Driver.read_head ~clock a));
       false
     with
     | Failure _ -> true
   in
   Alcotest.(check bool) "read_head caps an oversized handshake head" true raised
+
+(* P1-2 (review): the byte cap bounds memory, not lifetime. A peer that sends
+   bytes below the CRLFCRLF terminator — here, nothing at all — must be cut off
+   by a wall-clock deadline rather than holding the fiber+fd forever. With no
+   deadline this call would block indefinitely; the 50ms timeout must raise. *)
+let test_read_head_times_out () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  (* the peer (b) never sends a terminator *)
+  ignore b;
+  let raised =
+    try
+      ignore (Ws_direct_eio.Driver.read_head ~clock ~timeout:0.05 a);
+      false
+    with
+    | Failure _ -> true
+  in
+  Alcotest.(check bool) "read_head times out on a silent peer" true raised
 
 let () =
   Alcotest.run "ws-direct-eio client"
@@ -183,5 +206,7 @@ let () =
             `Quick test_reader_exception_isolated
         ; Alcotest.test_case "read_head caps oversized handshake head" `Quick
             test_read_head_caps_oversized
+        ; Alcotest.test_case "read_head times out on a silent peer (slowloris)"
+            `Quick test_read_head_times_out
         ] )
     ]

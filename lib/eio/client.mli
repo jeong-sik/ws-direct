@@ -6,9 +6,9 @@
     [two_way], it composes with a TLS flow ([Tls_eio.t]) for [wss://] without
     any change here. *)
 
-(** [connect ~sw ?random ?max_message ~host ~resource flow builder] runs the
-    handshake on [flow] and, on success, forks the read/write driver into [sw]
-    and returns the connection's writer.
+(** [connect ~sw ?random ?max_message ?handshake_timeout ~clock ~host ~resource
+    flow builder] runs the handshake on [flow] and, on success, forks the
+    read/write driver into [sw] and returns the connection's writer.
 
     [builder] receives that writer and returns the inbound handlers, exactly as
     for {!Ws_direct_core.Endpoint.create}. Outbound frames are masked with 4
@@ -16,13 +16,21 @@
     to {!Mirage_crypto_rng.generate}, so the caller must have seeded the RNG
     (e.g. via [Mirage_crypto_rng_unix] or [Mirage_crypto_rng_eio.run]).
 
+    The opening handshake runs under a [handshake_timeout]-second deadline on
+    [clock] (see {!Driver.read_head}) so a server that never completes the
+    upgrade cannot block the caller indefinitely.
+
     [host] and [resource] populate the request line and [Host] header.
 
-    @raise Failure if the server's response is not an acceptable 101 upgrade. *)
+    @raise Failure
+      if the server's response is not an acceptable 101 upgrade, or the
+      handshake deadline elapses. *)
 val connect :
    sw:Eio.Switch.t
   -> ?random:(int -> string)
   -> ?max_message:int
+  -> ?handshake_timeout:float
+  -> clock:_ Eio.Time.clock
   -> host:string
   -> resource:string
   -> _ Eio.Flow.two_way
