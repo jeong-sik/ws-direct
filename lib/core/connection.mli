@@ -56,6 +56,8 @@ val handle_frame : t -> Frame.parsed -> event option
     [bs.\[off .. off+len-1\]] in a single call, returning the resulting events
     in order and the number of bytes consumed. An incomplete trailing frame is
     left unconsumed (its bytes are reported as not consumed) so the caller can
-    re-present them once more data arrives. Parsing stops at the first
-    {!Fail}, which is included as the final event. *)
+    re-present them once more data arrives. Parsing stops at the first terminal
+    event — a {!Fail} (RFC 6455 §7.1.7) or a peer {!Close} (§5.5.1/§7.1.4) —
+    which is included as the final event; any frame after it in the same buffer
+    is left unconsumed and never processed. *)
 val read_bytes : t -> Bigstringaf.t -> off:int -> len:int -> event list * int

@@ -193,6 +193,31 @@ let test_close_bad_reason_utf8 () =
   drain C.Server (cf F.Opcode.Close "\x03\xe8\xff") |> fst
   |> check_fail ~code:1007 "non-UTF-8 close reason"
 
+(* --- no processing after a terminal event (RFC 6455 §7.1.7, §5.5.1) ------ *)
+
+(* A frame that fails the connection stops the drain: a later frame coalesced
+   into the same buffer must not be delivered (RFC 6455 §7.1.7). *)
+let test_no_processing_after_fail () =
+  let bad = sf F.Opcode.Text "x" (* unmasked from a client -> Fail 1002 *) in
+  let wire = bad ^ cf F.Opcode.Text "after" in
+  let events, consumed = drain C.Server wire in
+  Alcotest.(check int) "consumes only up to the failing frame"
+    (String.length bad) consumed;
+  check_fail ~code:1002 "fail then stop" events
+
+(* A data frame received after a Close is not delivered (RFC 6455 §5.5.1). *)
+let test_no_data_after_close () =
+  let close = cf F.Opcode.Close "\x03\xe8bye" in
+  let wire = close ^ cf F.Opcode.Text "after" in
+  let events, consumed = drain C.Server wire in
+  Alcotest.(check int) "consumes only up to the Close frame"
+    (String.length close) consumed;
+  match events with
+  | [ C.Close { code = Some 1000; reason = "bye" } ] -> ()
+  | _ ->
+    Alcotest.failf "expected exactly [Close], got %d events"
+      (List.length events)
+
 (* --- size caps (RFC 6455 §7.4.1 1009) ----------------------------------- *)
 
 (* a single (unfragmented) frame is a complete message and must obey max_message *)
@@ -266,6 +291,12 @@ let () =
             test_close_reserved_code
         ; Alcotest.test_case "non-UTF-8 reason -> 1007" `Quick
             test_close_bad_reason_utf8
+        ] )
+    ; ( "terminal stop"
+      , [ Alcotest.test_case "no frame processed after Fail" `Quick
+            test_no_processing_after_fail
+        ; Alcotest.test_case "no data frame delivered after Close" `Quick
+            test_no_data_after_close
         ] )
     ; ( "size caps"
       , [ Alcotest.test_case "single frame over max_message -> 1009" `Quick
