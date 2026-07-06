@@ -36,6 +36,7 @@ module Wsd = struct
       (Bigstringaf.of_string s ~off:0 ~len:(String.length s))
 
   let send_text w s = send_string w Frame.Opcode.Text s
+  let send_text_bigstring w payload = send_frame_bs w Frame.Opcode.Text payload
   let send_binary w s = send_string w Frame.Opcode.Binary s
   let send_ping w ?(payload = "") () = send_string w Frame.Opcode.Ping payload
   let send_pong w ?(payload = "") () = send_string w Frame.Opcode.Pong payload
