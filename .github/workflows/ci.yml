@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # 5.1 is the lower bound every package declares; 5.5 is what masc
+        # builds with.
+        ocaml-compiler: ["5.1", "5.5"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ matrix.ocaml-compiler }}
+      - run: opam install . --deps-only --with-test
+      # dune regenerates the opam files from dune-project; a diff means they
+      # were edited by hand or not regenerated.
+      - run: opam exec -- dune build @install @runtest
+      - run: git diff --exit-code -- '*.opam'
