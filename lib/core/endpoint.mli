@@ -19,6 +19,7 @@ module Wsd : sig
   type t
 
   val send_text : t -> string -> unit
+  val send_text_bigstring : t -> Bigstringaf.t -> unit
   val send_binary : t -> string -> unit
   val send_ping : t -> ?payload:string -> unit -> unit
   val send_pong : t -> ?payload:string -> unit -> unit

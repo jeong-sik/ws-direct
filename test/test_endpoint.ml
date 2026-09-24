@@ -52,6 +52,23 @@ let test_server_send_unmasked () =
   Alcotest.(check bool) "text" true (frame.F.opcode = F.Opcode.Text);
   Alcotest.(check string) "payload" "hello" (F.payload_string frame)
 
+let test_send_text_bigstring () =
+  let server = E.create E.Server (fun _ -> E.handlers ()) in
+  E.Wsd.send_text_bigstring (E.wsd server) (bs_of_string "server");
+  let server_frame = parse1 (drain_output server) in
+  Alcotest.(check bool) "server unmasked" false server_frame.masked;
+  Alcotest.(check string)
+    "server payload" "server" (F.payload_string server_frame.frame);
+  let client =
+    E.create E.Client ~random:(fun () -> "\x09\x0a\x0b\x0c") (fun _ ->
+        E.handlers ())
+  in
+  E.Wsd.send_text_bigstring (E.wsd client) (bs_of_string "client");
+  let client_frame = parse1 (drain_output client) in
+  Alcotest.(check bool) "client masked" true client_frame.masked;
+  Alcotest.(check string)
+    "client payload" "client" (F.payload_string client_frame.frame)
+
 let test_client_send_masked () =
   let t =
     E.create E.Client ~random:(fun () -> "\x09\x0a\x0b\x0c") (fun _ ->
@@ -199,6 +216,8 @@ let () =
     ; ( "send path"
       , [ Alcotest.test_case "server sends unmasked" `Quick
             test_server_send_unmasked
+        ; Alcotest.test_case "text bigstring send" `Quick
+            test_send_text_bigstring
         ; Alcotest.test_case "client sends masked" `Quick test_client_send_masked
         ] )
     ; ( "round trip"
