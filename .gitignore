@@ -1,4 +1,3 @@
 _build/
 _coverage/
-autobahn/reports/
-autobahn/reports9/
+.worktrees/
